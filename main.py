@@ -13,11 +13,11 @@ BUFFER_MINUTES = 30
 
 def authenticate_google_api() -> Credentials:
     credentials = None
-    access_token = os.getenv('GOOGLE_ACCESS_TOKEN')
-    refresh_token = os.getenv('GOOGLE_REFRESH_TOKEN')
-    token_uri = 'https://oauth2.googleapis.com/token'
-    client_id = os.getenv('GOOGLE_CLIENT_ID')
-    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+    access_token = os.getenv("GOOGLE_ACCESS_TOKEN")
+    refresh_token = os.getenv("GOOGLE_REFRESH_TOKEN")
+    token_uri = "https://oauth2.googleapis.com/token"
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
 
     if access_token:
         credentials = Credentials(
@@ -68,6 +68,7 @@ def get_events(
     filtered_events = [event for event in events if "dateTime" in event["start"]]
     return filtered_events
 
+
 def insert_event(calendar_id: str, event: dict, credentials: Credentials) -> None:
     service = build("calendar", "v3", credentials=credentials)
     print("Inserting event:", event)
@@ -95,7 +96,14 @@ def create_block_event(start: datetime, end: datetime, block_title: str = "↕")
     }
 
 
-def add_block_events(events_a: list, block_events_b: list, calendar_b: str, credentials: Credentials, buffer_minutes: int = BUFFER_MINUTES, block_title: str = "↕") -> bool:
+def add_block_events(
+    events_a: list,
+    block_events_b: list,
+    calendar_b: str,
+    credentials: Credentials,
+    buffer_minutes: int = BUFFER_MINUTES,
+    block_title: str = "↕",
+) -> bool:
     """
     Add block events that correspond to main events
     Return True if events were added
@@ -138,14 +146,20 @@ def add_block_events(events_a: list, block_events_b: list, calendar_b: str, cred
             updated = True
     return updated
 
-def remove_past_block_events(block_events_b: list, calendar_b: str, credentials: Credentials) -> bool:
+
+def remove_past_block_events(
+    block_events_b: list, calendar_b: str, credentials: Credentials
+) -> bool:
     """
     Remove past block events
     Return True if events were removed
     """
     updated = False
     for block_event in block_events_b:
-        if "dateTime" not in block_event["start"] or "dateTime" not in block_event["end"]:
+        if (
+            "dateTime" not in block_event["start"]
+            or "dateTime" not in block_event["end"]
+        ):
             continue
         block_end_time = datetime.fromisoformat(block_event["end"]["dateTime"])
         if block_end_time < datetime.now(timezone.utc):
@@ -153,19 +167,32 @@ def remove_past_block_events(block_events_b: list, calendar_b: str, credentials:
             updated = True
     return updated
 
-def remove_orphaned_block_events(events_a: list, block_events_b: list, calendar_b: str, credentials: Credentials, buffer_minutes: int = BUFFER_MINUTES) -> bool:
+
+def remove_orphaned_block_events(
+    events_a: list,
+    block_events_b: list,
+    calendar_b: str,
+    credentials: Credentials,
+    buffer_minutes: int = BUFFER_MINUTES,
+) -> bool:
     """
     Remove orphaned block events that no longer correspond to any main event
     Return True if events were removed
     """
     updated = False
     for block_event in block_events_b:
-        if "dateTime" not in block_event["start"] or "dateTime" not in block_event["end"]:
+        if (
+            "dateTime" not in block_event["start"]
+            or "dateTime" not in block_event["end"]
+        ):
             continue
         block_start_time = datetime.fromisoformat(block_event["start"]["dateTime"])
         block_end_time = datetime.fromisoformat(block_event["end"]["dateTime"])
 
-        if "dateTime" not in block_event["start"] or "dateTime" not in block_event["end"]:
+        if (
+            "dateTime" not in block_event["start"]
+            or "dateTime" not in block_event["end"]
+        ):
             continue
 
         related_events = [
@@ -209,7 +236,9 @@ def run(calendar_a, calendar_b, buffer_min=BUFFER_MINUTES, block_title="↕"):
         if event.get("summary") == block_title
     ]
 
-    add_block_events(events_a, block_events_b, calendar_b, credentials, buffer_min, block_title)
+    add_block_events(
+        events_a, block_events_b, calendar_b, credentials, buffer_min, block_title
+    )
     remove_orphaned_block_events(
         events_a, block_events_b, calendar_b, credentials, buffer_min
     )
@@ -217,9 +246,12 @@ def run(calendar_a, calendar_b, buffer_min=BUFFER_MINUTES, block_title="↕"):
     # remove past block events
     block_events_b = [
         event
-        for event in get_events(calendar_b, credentials, query=block_title, timeMin=datetime.min.isoformat() + "Z")
+        for event in get_events(
+            calendar_b,
+            credentials,
+            query=block_title,
+            timeMin=datetime.min.isoformat() + "Z",
+        )
         if event.get("summary") == block_title
     ]
     remove_past_block_events(block_events_b, calendar_b, credentials)
-
-
