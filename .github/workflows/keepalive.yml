@@ -1,5 +1,5 @@
-name: Prevent scheduled workflow from being automatically disabled
-
+# Prevent scheduled workflow from being automatically disabled
+name: keepalive
 on:
   schedule:
     - cron: "45 14 4,19 * *"
