@@ -48,15 +48,22 @@ def get_events(
     calendar_id: str,
     credentials: Credentials,
     query: str = None,
-    timeMin: datetime = datetime.utcnow().isoformat() + "Z",
+    timeMin: datetime = datetime.now(timezone.utc),
+    timeMax: datetime = (datetime.now(timezone.utc) + timedelta(days=90)),
 ) -> list:
+    def format_datetime(dt: datetime) -> str:
+        if dt == datetime.min:
+            return datetime.min.isoformat() + "Z"
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+
     service = build("calendar", "v3", credentials=credentials)
     events_result = (
         service.events()
         .list(
             calendarId=calendar_id,
-            timeMin=timeMin,
-            maxResults=50,
+            timeMin=format_datetime(timeMin),
+            timeMax=format_datetime(timeMax),
+            maxResults=500,
             singleEvents=True,
             orderBy="startTime",
             q=query,
@@ -69,7 +76,43 @@ def get_events(
     return filtered_events
 
 
+def check_event_exists(calendar_id: str, event: dict, credentials: Credentials) -> bool:
+    """
+    Check if an event exists same start and end time and summary
+    """
+    service = build("calendar", "v3", credentials=credentials)
+    # イベントの開始時刻、終了時刻、サマリーを使用してクエリを作成
+    start_time = event["start"]["dateTime"]
+    end_time = event["end"]["dateTime"]
+    summary = event["summary"]
+
+    query = f"startTime = '{start_time}' and endTime = '{end_time}' and summary = '{summary}'"
+
+    # クエリを使用してイベントを検索
+    events_result = (
+        service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=start_time,
+            timeMax=end_time,
+            q=query,
+            singleEvents=True,
+            maxResults=1,
+        )
+        .execute()
+    )
+
+    # 一致するイベントが見つかった場合はTrueを返す
+    if events_result.get("items", []):
+        return True
+    else:
+        return False
+
+
 def insert_event(calendar_id: str, event: dict, credentials: Credentials) -> None:
+    if check_event_exists(calendar_id, event, credentials):
+        print("Event already exists:", event)
+        return
     service = build("calendar", "v3", credentials=credentials)
     print("Inserting event:", event)
     event = service.events().insert(calendarId=calendar_id, body=event).execute()
@@ -96,6 +139,29 @@ def create_block_event(start: datetime, end: datetime, block_title: str = "↕")
     }
 
 
+def remove_duplicate_block_events(
+    block_events_b: list,
+    calendar_b: str,
+    credentials: Credentials,
+) -> bool:
+    """
+    Remove duplicate block events
+    Return True if events were removed
+    """
+    # find duplicate block events
+    duplicate_block_events = []
+    updated = False
+    event_dict = {}
+    for event in block_events_b:
+        key = (event["start"]["dateTime"], event["end"]["dateTime"], event["summary"])
+        if key in event_dict:
+            delete_event(calendar_b, event["id"], credentials)
+            updated = True
+        else:
+            event_dict[key] = event
+    return updated
+
+
 def add_block_events(
     events_a: list,
     block_events_b: list,
@@ -116,6 +182,12 @@ def add_block_events(
         start_time = datetime.fromisoformat(event["start"]["dateTime"])
         end_time = datetime.fromisoformat(event["end"]["dateTime"])
 
+        # skip events that are more than 90 days from now
+        now = datetime.now(timezone.utc)
+        ninety_days_later = now + timedelta(days=90)
+        if start_time <= now or start_time >= ninety_days_later:
+            continue
+
         block_start = start_time - timedelta(minutes=buffer_minutes)
         block_end = end_time + timedelta(minutes=buffer_minutes)
 
@@ -130,6 +202,7 @@ def add_block_events(
         if not existing_blocks:
             new_event = create_block_event(block_start, start_time, block_title)
             insert_event(calendar_b, new_event, credentials)
+            new_block_events.append(new_event)
             updated = True
 
         # post-block
@@ -222,6 +295,16 @@ def remove_orphaned_block_events(
     return updated
 
 
+def get_block_events(
+    calendar_b: str, credentials: Credentials, block_title: str = "↕"
+) -> list:
+    return [
+        event
+        for event in get_events(calendar_b, credentials, query=block_title)
+        if event.get("summary") == block_title
+    ]
+
+
 def run(calendar_a, calendar_b, buffer_min=BUFFER_MINUTES, block_title="↕"):
     credentials = authenticate_google_api()
 
@@ -230,11 +313,12 @@ def run(calendar_a, calendar_b, buffer_min=BUFFER_MINUTES, block_title="↕"):
         for event in get_events(calendar_a, credentials)
         if event.get("summary") != block_title
     ]
-    block_events_b = [
-        event
-        for event in get_events(calendar_b, credentials, query=block_title)
-        if event.get("summary") == block_title
-    ]
+
+    block_events_b = get_block_events(calendar_b, credentials, block_title)
+
+    while remove_duplicate_block_events(block_events_b, calendar_b, credentials):
+        block_events_b = get_block_events(calendar_b, credentials, block_title)
+        pass
 
     add_block_events(
         events_a, block_events_b, calendar_b, credentials, buffer_min, block_title
@@ -250,7 +334,7 @@ def run(calendar_a, calendar_b, buffer_min=BUFFER_MINUTES, block_title="↕"):
             calendar_b,
             credentials,
             query=block_title,
-            timeMin=datetime.min.isoformat() + "Z",
+            timeMin=datetime.min,
         )
         if event.get("summary") == block_title
     ]
